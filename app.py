@@ -3,6 +3,7 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.models import *
 import pandas as pd
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 import requests
 import json
@@ -59,8 +60,8 @@ def callback():
 @handler.add(FollowEvent)
 def handle_follow(event):
     user_id = event.source.user_id
-    # 第一次加好友時要求輸入姓名
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="歡迎加入！請輸入你的姓名（例如：我是王小明）"))
+    # 第一次加好友時要求輸入姓名（不顯示歡迎詞，只顯示範例）
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入你的姓名，例如：我是rita"))
 
 def fetch_instruments():
     df = pd.read_csv(DATA_PATH)
@@ -95,13 +96,13 @@ def handle_message(event):
             set_user_name(user_id, name)
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"姓名已設定為：{name}"))
         else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請正確輸入姓名，例如：我是王小明"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請正確輸入姓名，例如：我是rita"))
         return
 
     # 若用戶尚未設定姓名，要求輸入
     name = get_user_name(user_id)
     if not name:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請先輸入你的姓名（例如：我是王小明）"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請先輸入你的姓名，例如：我是rita"))
         return
 
     # 新增儀器列表指令
@@ -142,13 +143,13 @@ def handle_message(event):
             name = get_user_name(user_id)
             update_instrument(item, name, "borrow")
             del user_states[user_id]
-            now = datetime.now().strftime("%H:%M")
-            msg_text = f"✅ 你已成功借用 {item}，時間：{now}"
+            now = datetime.now().strftime("%Y/%m/%d %H:%M")
+            msg_text = f"{name}已成功借用{item}儀器 時間{now}"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         else:
             update_instrument(item, "-", "return")
             del user_states[user_id]
-            now = datetime.now().strftime("%H:%M")
+            now = datetime.now(ZoneInfo('Asia/Taipei')).strftime("%H:%M")
             msg_text = f"🔁 你已成功歸還 {item}，時間：{now}"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         return

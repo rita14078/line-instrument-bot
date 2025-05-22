@@ -4,6 +4,9 @@ from linebot.models import *
 import pandas as pd
 from datetime import datetime
 import os
+import requests
+import json
+import psycopg2
 
 app = Flask(__name__)
 
@@ -16,7 +19,29 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 DATA_PATH = "instrument_status.csv"
 user_states = {}
-user_names = {}  # 新增用戶姓名綁定
+
+# Neon PostgreSQL 連線
+def get_db_conn():
+    return psycopg2.connect(os.environ["DATABASE_URL"], sslmode='require')
+
+def get_user_name(user_id):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS user_names (user_id TEXT PRIMARY KEY, name TEXT)")
+    cur.execute("SELECT name FROM user_names WHERE user_id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row[0] if row else None
+
+def set_user_name(user_id, name):
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS user_names (user_id TEXT PRIMARY KEY, name TEXT)")
+    cur.execute("INSERT INTO user_names (user_id, name) VALUES (%s, %s) ON CONFLICT (user_id) DO UPDATE SET name = EXCLUDED.name", (user_id, name))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -37,43 +62,55 @@ def handle_follow(event):
     # 第一次加好友時要求輸入姓名
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="歡迎加入！請輸入你的姓名（例如：我是王小明）"))
 
+def fetch_instruments():
+    url = "https://instrument-manager.onrender.com/api/instruments"
+    resp = requests.get(url)
+    return resp.json()
+
+def update_instrument(item, name, action):
+    url = "https://instrument-manager.onrender.com/api/instruments/update"
+    payload = {"item": item, "name": name, "action": action}
+    resp = requests.post(url, json=payload)
+    return resp.json()
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
     msg = event.message.text.strip()
 
-    # 處理用戶輸入姓名
+    # 處理用戶輸入姓名與更改姓名
     if msg.startswith("我是") and len(msg) > 2:
         name = msg[2:].strip()
         if name:
-            user_names[user_id] = name
+            set_user_name(user_id, name)
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"姓名已設定為：{name}"))
         else:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請正確輸入姓名，例如：我是王小明"))
         return
 
     # 若用戶尚未設定姓名，要求輸入
-    if user_id not in user_names:
+    name = get_user_name(user_id)
+    if not name:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請先輸入你的姓名（例如：我是王小明）"))
         return
 
     # 新增儀器列表指令
     if msg == "儀器列表":
-        df = pd.read_csv(DATA_PATH)
+        instruments = fetch_instruments()
         lines = []
-        for _, row in df.iterrows():
+        for row in instruments:
             lines.append(f"{row['儀器名稱']}：{'可借用' if row['狀態']=='free' else '使用中（'+row['使用者']+'）'}")
         reply = "\n".join(lines) if lines else "目前沒有儀器資料"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
     if msg in ["借用", "歸還"]:
-        df = pd.read_csv(DATA_PATH)
+        instruments = fetch_instruments()
         if msg == "借用":
-            items = df[df["狀態"] == "free"]["儀器名稱"].tolist()
+            items = [row["儀器名稱"] for row in instruments if row["狀態"] == "free"]
             action = "borrow"
         else:
-            items = df[df["狀態"] == "in_use"]["儀器名稱"].tolist()
+            items = [row["儀器名稱"] for row in instruments if row["狀態"] == "in_use"]
             action = "return"
 
         if not items:
@@ -92,31 +129,17 @@ def handle_message(event):
         item = msg.replace("選擇 ", "")
         action = user_states[user_id]["action"]
         if action == "borrow":
-            # 直接用已綁定姓名借用
-            name = user_names.get(user_id, "-")
-            df = pd.read_csv(DATA_PATH)
-            now = datetime.now().strftime("%Y/%m/%d %H:%M")
-            idx = df[df["儀器名稱"] == item].index[0]
-            df.at[idx, "狀態"] = "in_use"
-            df.at[idx, "使用者"] = name
-            df.at[idx, "借用時間"] = now
-            df.at[idx, "使用時長"] = "0 分鐘"
-            df.to_csv(DATA_PATH, index=False)
+            name = get_user_name(user_id)
+            update_instrument(item, name, "borrow")
             del user_states[user_id]
-            msg_text = f"✅ 你已成功借用 {item}，時間：{now.split(' ')[1]}"
+            now = datetime.now().strftime("%H:%M")
+            msg_text = f"✅ 你已成功借用 {item}，時間：{now}"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         else:
-            # 歸還時直接完成歸還
-            df = pd.read_csv(DATA_PATH)
-            now = datetime.now().strftime("%Y/%m/%d %H:%M")
-            idx = df[df["儀器名稱"] == item].index[0]
-            df.at[idx, "狀態"] = "free"
-            df.at[idx, "使用者"] = "-"
-            df.at[idx, "借用時間"] = "-"
-            df.at[idx, "使用時長"] = "-"
-            df.to_csv(DATA_PATH, index=False)
+            update_instrument(item, "-", "return")
             del user_states[user_id]
-            msg_text = f"🔁 你已成功歸還 {item}，時間：{now.split(' ')[1]}"
+            now = datetime.now().strftime("%H:%M")
+            msg_text = f"🔁 你已成功歸還 {item}，時間：{now}"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         return
 

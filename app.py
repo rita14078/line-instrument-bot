@@ -3,6 +3,7 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.models import *
 import pandas as pd
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 
@@ -90,4 +91,5 @@ def handle_message(event):
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入：借用 或 歸還"))
 
 if __name__ == "__main__":
-    app.run()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

@@ -68,8 +68,23 @@ def handle_message(event):
 
     if user_id in user_states and user_states[user_id]["step"] == "choose_item" and msg.startswith("選擇 "):
         item = msg.replace("選擇 ", "")
-        user_states[user_id].update({"step": "input_name", "item": item})
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"請輸入你的姓名以{ '借用' if user_states[user_id]['action'] == 'borrow' else '歸還' } {item}"))
+        action = user_states[user_id]["action"]
+        if action == "borrow":
+            user_states[user_id].update({"step": "input_name", "item": item})
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"請輸入你的姓名以借用 {item}"))
+        else:
+            # 歸還時直接完成歸還
+            df = pd.read_csv(DATA_PATH)
+            now = datetime.now().strftime("%Y/%m/%d %H:%M")
+            idx = df[df["儀器名稱"] == item].index[0]
+            df.at[idx, "狀態"] = "free"
+            df.at[idx, "使用者"] = "-"
+            df.at[idx, "借用時間"] = "-"
+            df.at[idx, "使用時長"] = "-"
+            df.to_csv(DATA_PATH, index=False)
+            del user_states[user_id]
+            msg_text = f"🔁 你已成功歸還 {item}，時間：{now.split(' ')[1]}"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         return
 
     if user_id in user_states and user_states[user_id]["step"] == "input_name":
@@ -88,15 +103,8 @@ def handle_message(event):
             df.at[idx, "借用時間"] = now
             df.at[idx, "使用時長"] = "0 分鐘"
             msg_text = f"✅ 你已成功借用 {item}，時間：{now.split(' ')[1]}"
-        else:
-            df.at[idx, "狀態"] = "free"
-            df.at[idx, "使用者"] = "-"
-            df.at[idx, "借用時間"] = "-"
-            df.at[idx, "使用時長"] = "-"
-            msg_text = f"🔁 你已成功歸還 {item}，時間：{now.split(' ')[1]}"
-
-        df.to_csv(DATA_PATH, index=False)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
+            df.to_csv(DATA_PATH, index=False)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         return
 
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入：借用 或 歸還"))

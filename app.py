@@ -63,9 +63,20 @@ def handle_follow(event):
     # 第一次加好友時要求輸入姓名（不顯示歡迎詞，只顯示範例）
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請輸入你的姓名，例如：我是rita"))
 
+# API base URL
+API_BASE = os.environ.get("INSTRUMENT_API_BASE", "https://instrument-manager.onrender.com/api")
+
+# 取得儀器列表（API 版）
 def fetch_instruments():
-    df = pd.read_csv(DATA_PATH)
-    return df.to_dict(orient="records")
+    resp = requests.get(f"{API_BASE}/instruments")
+    resp.raise_for_status()
+    return resp.json()
+
+# 更新儀器狀態（API 版）
+def update_instrument(item, name, action):
+    resp = requests.post(f"{API_BASE}/instruments/update", json={"item": item, "name": name, "action": action})
+    resp.raise_for_status()
+    return resp.json()
 
 def update_instrument(item, name, action):
     df = pd.read_csv(DATA_PATH)

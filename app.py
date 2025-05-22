@@ -63,15 +63,25 @@ def handle_follow(event):
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="歡迎加入！請輸入你的姓名（例如：我是王小明）"))
 
 def fetch_instruments():
-    url = "https://instrument-manager.onrender.com/api/instruments"
-    resp = requests.get(url)
-    return resp.json()
+    df = pd.read_csv(DATA_PATH)
+    return df.to_dict(orient="records")
 
 def update_instrument(item, name, action):
-    url = "https://instrument-manager.onrender.com/api/instruments/update"
-    payload = {"item": item, "name": name, "action": action}
-    resp = requests.post(url, json=payload)
-    return resp.json()
+    df = pd.read_csv(DATA_PATH)
+    idx = df[df["儀器名稱"] == item].index[0]
+    now = datetime.now().strftime("%Y/%m/%d %H:%M")
+    if action == "borrow":
+        df.at[idx, "狀態"] = "in_use"
+        df.at[idx, "使用者"] = name
+        df.at[idx, "借用時間"] = now
+        df.at[idx, "使用時長"] = "0 分鐘"
+    elif action == "return":
+        df.at[idx, "狀態"] = "free"
+        df.at[idx, "使用者"] = "-"
+        df.at[idx, "借用時間"] = "-"
+        df.at[idx, "使用時長"] = "-"
+    df.to_csv(DATA_PATH, index=False)
+    return {"success": True}
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):

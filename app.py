@@ -35,6 +35,16 @@ def handle_message(event):
     user_id = event.source.user_id
     msg = event.message.text.strip()
 
+    # 新增儀器列表指令
+    if msg == "儀器列表":
+        df = pd.read_csv(DATA_PATH)
+        lines = []
+        for _, row in df.iterrows():
+            lines.append(f"{row['儀器名稱']}：{'可借用' if row['狀態']=='free' else '使用中（'+row['使用者']+'）'}")
+        reply = "\n".join(lines) if lines else "目前沒有儀器資料"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
     if msg in ["借用", "歸還"]:
         df = pd.read_csv(DATA_PATH)
         if msg == "借用":

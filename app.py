@@ -16,6 +16,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 DATA_PATH = "instrument_status.csv"
 user_states = {}
+user_names = {}  # 新增用戶姓名綁定
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -30,10 +31,31 @@ def callback():
 
     return 'OK', 200
 
+@handler.add(FollowEvent)
+def handle_follow(event):
+    user_id = event.source.user_id
+    # 第一次加好友時要求輸入姓名
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="歡迎加入！請輸入你的姓名（例如：我是王小明）"))
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
     msg = event.message.text.strip()
+
+    # 處理用戶輸入姓名
+    if msg.startswith("我是") and len(msg) > 2:
+        name = msg[2:].strip()
+        if name:
+            user_names[user_id] = name
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"姓名已設定為：{name}"))
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請正確輸入姓名，例如：我是王小明"))
+        return
+
+    # 若用戶尚未設定姓名，要求輸入
+    if user_id not in user_names:
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="請先輸入你的姓名（例如：我是王小明）"))
+        return
 
     # 新增儀器列表指令
     if msg == "儀器列表":
@@ -70,8 +92,19 @@ def handle_message(event):
         item = msg.replace("選擇 ", "")
         action = user_states[user_id]["action"]
         if action == "borrow":
-            user_states[user_id].update({"step": "input_name", "item": item})
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"請輸入你的姓名以借用 {item}"))
+            # 直接用已綁定姓名借用
+            name = user_names.get(user_id, "-")
+            df = pd.read_csv(DATA_PATH)
+            now = datetime.now().strftime("%Y/%m/%d %H:%M")
+            idx = df[df["儀器名稱"] == item].index[0]
+            df.at[idx, "狀態"] = "in_use"
+            df.at[idx, "使用者"] = name
+            df.at[idx, "借用時間"] = now
+            df.at[idx, "使用時長"] = "0 分鐘"
+            df.to_csv(DATA_PATH, index=False)
+            del user_states[user_id]
+            msg_text = f"✅ 你已成功借用 {item}，時間：{now.split(' ')[1]}"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         else:
             # 歸還時直接完成歸還
             df = pd.read_csv(DATA_PATH)
@@ -84,26 +117,6 @@ def handle_message(event):
             df.to_csv(DATA_PATH, index=False)
             del user_states[user_id]
             msg_text = f"🔁 你已成功歸還 {item}，時間：{now.split(' ')[1]}"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
-        return
-
-    if user_id in user_states and user_states[user_id]["step"] == "input_name":
-        name = msg
-        action = user_states[user_id]["action"]
-        item = user_states[user_id]["item"]
-        del user_states[user_id]
-
-        df = pd.read_csv(DATA_PATH)
-        now = datetime.now().strftime("%Y/%m/%d %H:%M")
-        idx = df[df["儀器名稱"] == item].index[0]
-
-        if action == "borrow":
-            df.at[idx, "狀態"] = "in_use"
-            df.at[idx, "使用者"] = name
-            df.at[idx, "借用時間"] = now
-            df.at[idx, "使用時長"] = "0 分鐘"
-            msg_text = f"✅ 你已成功借用 {item}，時間：{now.split(' ')[1]}"
-            df.to_csv(DATA_PATH, index=False)
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         return
 

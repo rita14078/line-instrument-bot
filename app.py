@@ -137,7 +137,7 @@ def handle_message(event):
             name = get_user_name(user_id)
             update_instrument(item, name, "borrow")
             del user_states[user_id]
-            now = datetime.now().strftime("%Y/%m/%d %H:%M")
+            now = datetime.now(ZoneInfo('Asia/Taipei')).strftime("%Y/%m/%d %H:%M")
             msg_text = f"{name}已成功借用{item}儀器 時間{now}"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg_text))
         else:
